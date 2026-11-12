@@ -245,6 +245,11 @@ th[aria-sort="descending"] .npq-sort::after { content: " \2193"; color: var(--co
 .npq-hero-teks { display:flex; flex-direction:column; gap:10px; min-width:0; flex:1 1 auto; }
 .npq-logo { flex:0 0 auto; align-self:center; height:auto; width:clamp(72px,11vw,132px); aspect-ratio:1; object-fit:contain; filter:drop-shadow(0 0 1.5px rgba(255,255,255,.95)) drop-shadow(0 0 1px rgba(255,255,255,.9)) drop-shadow(0 8px 18px rgba(0,0,0,.35)); }
 @media (max-width:560px){ .npq-logo { width:64px; } .npq-hero { gap:14px; } }
+.npq [hidden], .npq-btn[hidden], .npq-pengurus[hidden] { display:none !important; }
+.npq-pengurus { font-size:.85rem; color:var(--color-fg-muted); align-self:center; max-width:18ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.npq-auth-kotak { max-width:440px; }
+.npq-auth-borang { display:flex; flex-direction:column; gap:12px; }
+.npq-auth-borang .npq-input { width:100%; box-sizing:border-box; }
 @media (max-width:560px){ .npq-big { padding-right:0; } .npq-gauge { display:none; } .npq-hero { border-radius:16px; } }
 @media (prefers-reduced-motion:reduce){ .npq *,.npq *::before,.npq *::after { animation:none !important; transition:none !important; } }
 
@@ -321,7 +326,10 @@ th[aria-sort="descending"] .npq-sort::after { content: " \2193"; color: var(--co
     <select class="dash-select" id="npq-f-pensyarah" data-draw="pilih-pensyarah" aria-label="Pensyarah" data-source="sesi"></select>
   </label>
   <button type="button" class="npq-btn" id="npq-reset">Set semula penapis</button>
-  <button type="button" class="npq-btn npq-btn-utama" id="npq-buka-muat">Muat naik data</button>
+  <button type="button" class="npq-btn npq-btn-utama" id="npq-buka-muat" hidden>Muat naik data</button>
+  <button type="button" class="npq-btn" id="npq-log-masuk">Log masuk Pengurus</button>
+  <span class="npq-pengurus" id="npq-nama-pengurus" hidden></span>
+  <button type="button" class="npq-btn" id="npq-log-keluar" hidden>Log keluar</button>
 </div>
 <div class="npq-chips" id="npq-chips" data-draw="cip-penapis" aria-live="polite"></div>
 
@@ -648,6 +656,37 @@ th[aria-sort="descending"] .npq-sort::after { content: " \2193"; color: var(--co
   </div>
 </section>
 
+
+<!-- ============ MODAL LOG MASUK PENGURUS ============ -->
+<div class="npq-modal" id="npq-modal-auth" hidden role="dialog" aria-modal="true" aria-labelledby="npq-auth-tajuk">
+  <div class="npq-modal-latar" data-tutup-auth></div>
+  <div class="npq-modal-kotak npq-auth-kotak">
+    <header class="npq-modal-kepala">
+      <h2 class="npq-modal-h" id="npq-auth-tajuk">Log masuk Pengurus</h2>
+      <button type="button" class="npq-btn" id="npq-auth-tutup" aria-label="Tutup tetingkap log masuk">Tutup</button>
+    </header>
+    <form id="npq-auth-log" class="npq-auth-borang" autocomplete="on">
+      <p class="npq-note">Hanya Pengurus sistem yang boleh memuat naik data. Papar dashboard tidak memerlukan log masuk.</p>
+      <label class="npq-field"><span>E-mel</span><input class="npq-input" id="npq-auth-emel" type="email" autocomplete="username" required></label>
+      <label class="npq-field"><span>Kata laluan</span><input class="npq-input" id="npq-auth-kl" type="password" autocomplete="current-password" required></label>
+      <div class="npq-filters"><button type="submit" class="npq-btn npq-btn-utama">Log masuk</button>
+      <button type="button" class="npq-btn" id="npq-auth-ke-lupa">Lupa kata laluan?</button></div>
+    </form>
+    <form id="npq-auth-lupa" class="npq-auth-borang" hidden>
+      <p class="npq-note">Masukkan e-mel akaun Pengurus. Jika akaun wujud, pautan untuk menetapkan semula kata laluan akan dihantar ke e-mel itu.</p>
+      <label class="npq-field"><span>E-mel</span><input class="npq-input" id="npq-auth-emel2" type="email" autocomplete="username" required></label>
+      <div class="npq-filters"><button type="submit" class="npq-btn npq-btn-utama">Hantar pautan</button>
+      <button type="button" class="npq-btn" id="npq-auth-ke-log">Kembali</button></div>
+    </form>
+    <form id="npq-auth-tetap" class="npq-auth-borang" hidden>
+      <p class="npq-note">Tetapkan kata laluan baharu (sekurang-kurangnya 8 aksara).</p>
+      <label class="npq-field"><span>Kata laluan baharu</span><input class="npq-input" id="npq-auth-baru" type="password" autocomplete="new-password" minlength="8" required></label>
+      <label class="npq-field"><span>Ulang kata laluan baharu</span><input class="npq-input" id="npq-auth-baru2" type="password" autocomplete="new-password" minlength="8" required></label>
+      <div class="npq-filters"><button type="submit" class="npq-btn npq-btn-utama">Simpan kata laluan</button></div>
+    </form>
+    <p class="npq-note" id="npq-auth-mesej" role="alert" aria-live="assertive"></p>
+  </div>
+</div>
 
 <!-- ============ MODAL MUAT NAIK ============ -->
 <div class="npq-modal" id="npq-modal-muat" hidden role="dialog" aria-modal="true" aria-labelledby="npq-modal-tajuk">
@@ -2420,7 +2459,7 @@ if (typeof window !== 'undefined') window.NPQ_PDF = NPQ_PDF;
   const modal = $('npq-modal-muat');
   let pemicu = null;
   const buka = () => {
-    if (!modal) return;
+    if (!modal || !window.NPQ_PENGURUS) return;
     pemicu = document.activeElement;
     modal.hidden = false;
     ['ringkas-muat', 'ringkas-pdf', 'senarai-kumpulan', 'pautan-templat', 'status-simpan', 'mesej-muat'].forEach((n) => dash.draw(n));
@@ -2658,6 +2697,125 @@ if (typeof window !== 'undefined') window.NPQ_PDF = NPQ_PDF;
       (senarai || []).forEach((e) => S.ada.set(e.key, e));
       if (S.ada.size) ['pilih-kumpulan', 'senarai-kumpulan'].forEach((n) => dash.draw(n));
     }).catch(() => {});
+  }
+})();
+</script>
+<script>
+// ---------- Log masuk Pengurus (Supabase Auth melalui REST; tiada pustaka luar) ----------
+// ISI dua nilai ini daripada Supabase: Project Settings > API (URL projek dan kunci "anon" awam).
+window.NPQ_AUTH_CONFIG = window.NPQ_AUTH_CONFIG || {url: '', anonKey: ''};
+(function () {
+  const C = window.NPQ_AUTH_CONFIG;
+  const $ = (id) => document.getElementById(id);
+  const KUNCI = 'npq-sesi-pengurus';
+  const TETAPAN = !!(C.url && C.anonKey);
+  const base = TETAPAN ? C.url.replace(/\/+$/, '') + '/auth/v1' : '';
+  let sesi = null, pemasa = null, pemicu = null;
+  const simpan = (s) => { try { s ? localStorage.setItem(KUNCI, JSON.stringify(s)) : localStorage.removeItem(KUNCI); } catch (x) {} };
+  const muatSimpan = () => { try { return JSON.parse(localStorage.getItem(KUNCI) || 'null'); } catch (x) { return null; } };
+  const mesej = (t, ok) => { const m = $('npq-auth-mesej'); m.textContent = t || ''; m.style.color = ok ? '' : (t ? 'var(--color-danger, #b3261e)' : ''); };
+  const paparan = (id) => { ['npq-auth-log', 'npq-auth-lupa', 'npq-auth-tetap'].forEach((x) => { $(x).hidden = x !== id; }); mesej(''); };
+  async function panggil(laluan, kaedah, badan, token) {
+    const r = await fetch(base + laluan, {method: kaedah, headers: {'Content-Type': 'application/json', apikey: C.anonKey, Authorization: 'Bearer ' + (token || C.anonKey)}, body: badan ? JSON.stringify(badan) : undefined});
+    let j = null; try { j = await r.json(); } catch (x) {}
+    if (!r.ok) { const e = new Error((j && (j.msg || j.error_description || j.message)) || 'Ralat ' + r.status); e.status = r.status; e.kod = j && (j.error_code || j.code); throw e; }
+    return j;
+  }
+  const mesejRalat = (e, lalai) => {
+    if (e && e.kod === 'invalid_credentials' || (e && e.status === 400 && /invalid login/i.test(e.message))) return 'E-mel atau kata laluan tidak betul.';
+    if (e && e.status === 429) return 'Terlalu banyak percubaan. Sila cuba semula sebentar lagi.';
+    if (e instanceof TypeError) return 'Tidak dapat menghubungi pelayan log masuk. Semak sambungan internet.';
+    return lalai;
+  };
+  function terapkan() {
+    const masuk = !!sesi;
+    $('npq-buka-muat').hidden = !masuk;
+    $('npq-log-masuk').hidden = masuk;
+    $('npq-log-keluar').hidden = !masuk;
+    const nm = $('npq-nama-pengurus'); nm.hidden = !masuk; nm.textContent = masuk ? sesi.emel : '';
+    window.NPQ_PENGURUS = masuk;
+    if (!masuk) { const m = $('npq-modal-muat'); if (m && !m.hidden) { const t = $('npq-tutup-muat'); if (t) t.click(); } }
+  }
+  function tetapSesi(j, emel) {
+    sesi = {at: j.access_token, rt: j.refresh_token, tamat: Date.now() + (j.expires_in || 3600) * 1000, emel: (j.user && j.user.email) || emel || ''};
+    simpan(sesi); jadualSegar(); terapkan();
+  }
+  function jadualSegar() {
+    clearTimeout(pemasa);
+    if (!sesi) return;
+    pemasa = setTimeout(segar, Math.max(5000, sesi.tamat - Date.now() - 60000));
+  }
+  async function segar() {
+    if (!sesi || !TETAPAN) return;
+    try { tetapSesi(await panggil('/token?grant_type=refresh_token', 'POST', {refresh_token: sesi.rt}), sesi.emel); }
+    catch (e) { if (e instanceof TypeError) { pemasa = setTimeout(segar, 30000); return; } sesi = null; simpan(null); terapkan(); }
+  }
+  const buka = (pandangan) => {
+    pemicu = document.activeElement; $('npq-modal-auth').hidden = false; paparan(pandangan || 'npq-auth-log');
+    if (!TETAPAN) mesej('Sambungan log masuk belum disediakan oleh pentadbir laman (lihat README: Log masuk Pengurus).');
+    const f = $(pandangan === 'npq-auth-tetap' ? 'npq-auth-baru' : 'npq-auth-emel'); if (f) f.focus();
+  };
+  const tutup = () => {
+    $('npq-modal-auth').hidden = true; ['npq-auth-kl', 'npq-auth-baru', 'npq-auth-baru2'].forEach((i) => { $(i).value = ''; }); mesej('');
+    if (pemicu && pemicu.focus) pemicu.focus();
+  };
+  $('npq-log-masuk').addEventListener('click', () => buka());
+  $('npq-auth-tutup').addEventListener('click', tutup);
+  $('npq-modal-auth').addEventListener('click', (e) => { if (e.target.closest('[data-tutup-auth]')) tutup(); });
+  $('npq-modal-auth').addEventListener('keydown', (e) => { if (e.key === 'Escape') tutup(); });
+  $('npq-auth-ke-lupa').addEventListener('click', () => { $('npq-auth-emel2').value = $('npq-auth-emel').value; paparan('npq-auth-lupa'); });
+  $('npq-auth-ke-log').addEventListener('click', () => paparan('npq-auth-log'));
+
+  $('npq-auth-log').addEventListener('submit', async (ev) => {
+    ev.preventDefault(); if (!TETAPAN) return mesej('Sambungan log masuk belum disediakan.');
+    const emel = $('npq-auth-emel').value.trim(), kl = $('npq-auth-kl').value;
+    const btn = ev.submitter; if (btn) btn.disabled = true; mesej('Sedang log masuk...', true);
+    try { tetapSesi(await panggil('/token?grant_type=password', 'POST', {email: emel, password: kl}), emel); tutup(); }
+    catch (e) { mesej(mesejRalat(e, 'Log masuk gagal. Cuba lagi.')); }
+    if (btn) btn.disabled = false; $('npq-auth-kl').value = '';
+  });
+  $('npq-auth-lupa').addEventListener('submit', async (ev) => {
+    ev.preventDefault(); if (!TETAPAN) return mesej('Sambungan log masuk belum disediakan.');
+    const btn = ev.submitter; if (btn) btn.disabled = true; mesej('Menghantar...', true);
+    try {
+      const ke = location.origin + location.pathname;
+      await panggil('/recover?redirect_to=' + encodeURIComponent(ke), 'POST', {email: $('npq-auth-emel2').value.trim()});
+      mesej('Jika e-mel itu didaftarkan sebagai Pengurus, pautan tetapan semula telah dihantar. Semak peti masuk dan folder spam.', true);
+    } catch (e) { mesej(mesejRalat(e, 'Pautan tidak dapat dihantar sekarang. Cuba lagi sebentar.')); }
+    if (btn) btn.disabled = false;
+  });
+  let tokenPulih = null;
+  $('npq-auth-tetap').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const a = $('npq-auth-baru').value, b = $('npq-auth-baru2').value;
+    if (a.length < 8) return mesej('Kata laluan mestilah sekurang-kurangnya 8 aksara.');
+    if (a !== b) return mesej('Kedua-dua kata laluan tidak sama.');
+    const btn = ev.submitter; if (btn) btn.disabled = true; mesej('Menyimpan...', true);
+    try {
+      const u = await panggil('/user', 'PUT', {password: a}, tokenPulih.at);
+      tetapSesi({access_token: tokenPulih.at, refresh_token: tokenPulih.rt, expires_in: tokenPulih.exp, user: u}, u.email); tokenPulih = null; tutup();
+    } catch (e) { mesej(mesejRalat(e, 'Kata laluan tidak dapat disimpan. Pautan mungkin telah tamat tempoh; minta pautan baharu.')); }
+    if (btn) btn.disabled = false;
+  });
+  $('npq-log-keluar').addEventListener('click', async () => {
+    const t = sesi && sesi.at; sesi = null; simpan(null); clearTimeout(pemasa); terapkan();
+    if (t && TETAPAN) { try { await panggil('/logout', 'POST', null, t); } catch (x) {} }
+  });
+
+  // Pautan tetapan semula kata laluan: token berada pada #hash.
+  const h = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const ralatPautan = h.get('error_description');
+  if (h.get('type') === 'recovery' && h.get('access_token')) {
+    tokenPulih = {at: h.get('access_token'), rt: h.get('refresh_token') || '', exp: parseInt(h.get('expires_in') || '3600', 10)};
+    history.replaceState(null, '', location.pathname + location.search);
+    terapkan(); buka('npq-auth-tetap');
+  } else if (ralatPautan) {
+    history.replaceState(null, '', location.pathname + location.search);
+    terapkan(); buka('npq-auth-lupa'); mesej('Pautan tidak sah atau telah tamat tempoh. Minta pautan baharu di bawah.');
+  } else {
+    const s = TETAPAN ? muatSimpan() : null;
+    terapkan();
+    if (s && s.rt) { sesi = s; (async () => { if (s.tamat - Date.now() < 60000) await segar(); else { try { const u = await panggil('/user', 'GET', null, s.at); sesi.emel = u.email || s.emel; terapkan(); jadualSegar(); } catch (e) { if (e instanceof TypeError) { terapkan(); jadualSegar(); } else await segar(); } } terapkan(); })(); terapkan(); }
   }
 })();
 </script>

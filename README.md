@@ -19,3 +19,17 @@ Dalam modal **Muat naik data**, bahagian "Atau tukar terus daripada PDF i-Penila
 
 ## Alat Python (pilihan)
 Lihat [`alat/README.md`](alat/README.md) untuk menukar PDF kepada fail xlsx di luar dashboard.
+
+## Log masuk Pengurus (Supabase Auth)
+Butang **Muat naik data** disembunyikan secara lalai dan hanya muncul selepas Pengurus log masuk. Terdapat **Log masuk**, **Log keluar** dan **Lupa kata laluan** (e-mel pautan tetapan semula).
+
+### Persediaan (sekali sahaja)
+1. Cipta projek percuma di https://supabase.com.
+2. **Authentication > Sign In / Providers > Email**: aktifkan Email; matikan **Allow new users to sign up** (supaya hanya akaun yang anda cipta boleh log masuk).
+3. **Authentication > Users > Add user**: cipta akaun setiap Pengurus (e-mel dan kata laluan awal; pilih *Auto Confirm User*). Pengurus tambahan ditambah di sini juga.
+4. **Authentication > URL Configuration**: tetapkan *Site URL* kepada alamat dashboard (contoh `https://fadzilma-cloud.github.io/dashboard-penilaian-npqel/`) dan tambah alamat yang sama pada *Redirect URLs*. Tanpa ini pautan Lupa kata laluan tidak akan kembali ke dashboard.
+5. **Project Settings > API**: salin *Project URL* dan kunci **anon public**. Kunci ini memang awam; jangan sekali-kali masukkan kunci `service_role`.
+6. Dalam `index.html`, isi `window.NPQ_AUTH_CONFIG = {url: '...', anonKey: '...'}` (cari `NPQ_AUTH_CONFIG`).
+
+### Had keselamatan
+Dashboard ialah laman statik dan data paparan sedia ada dalam fail HTML, jadi log masuk ini mengawal akses kepada fungsi muat naik, bukan kerahsiaan data paparan. Data yang dimuat naik hanya disimpan dalam pelayar pengurus itu sendiri (IndexedDB), bukan dikongsi dengan pelawat lain.
