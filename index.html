@@ -2614,9 +2614,27 @@ if (typeof window !== 'undefined') window.NPQ_PDF = NPQ_PDF;
       if (!/^[\p{L}\p{N} _.\-]{1,24}$/u.test(kump)) return mesejSimpan('Nama kumpulan wajib diisi (1–24 huruf, nombor atau ruang).');
       if (!Number.isInteger(tahun) || tahun < 2000 || tahun > 2100) return mesejSimpan('Tahun ambilan mestilah antara 2000 dan 2100.');
       mesejSimpan('');
-      const key = kunciDari(kump, tahun);
+      let key = kunciDari(kump, tahun);
+      for (const v of S.ada.values()) if (v.tahun === tahun && v.kumpulan.trim().toLowerCase() === kump.toLowerCase()) key = v.key;
       if (kump.toLowerCase() === ASAL.kumpulan.toLowerCase() && tahun === ASAL.tahun) return mesejSimpan(`${ASAL.kumpulan} ${ASAL.tahun} ialah data asal dashboard dan tidak boleh digantikan.`);
-      const e = {key, kumpulan: kump, tahun, at: new Date().toISOString(), fail: c.nama, data: c.data};
+      const lama = S.ada.get(key);
+      let gabung = c.data, namaFail = c.nama, nota = '';
+      if (lama) {
+        // Kumpulan dan tahun sama: kekalkan fasa sedia ada, ganti hanya fasa yang dimuat naik semula.
+        const baru = new Set();
+        NAMA.forEach((n) => c.data[n].forEach((r) => { if (r.fasa != null) baru.add(r.fasa); }));
+        gabung = {};
+        for (const n of NAMA) gabung[n] = [...lama.data[n].filter((r) => !baru.has(r.fasa)), ...c.data[n]];
+        const kira = new Map();
+        gabung.sesi.forEach((r) => kira.set(r.id, (kira.get(r.id) || 0) + 1));
+        const dup = [...kira].filter(([, v]) => v > 1).map(([k]) => k);
+        if (dup.length) return mesejSimpan(`Id sesi bertindih dengan fasa sedia ada bagi ${kump} ${tahun} (${dup.slice(0, 3).join(', ')}). Pastikan id sesi unik merentas fasa.`);
+        const susun = (a, b) => String(a.fasa).localeCompare(String(b.fasa));
+        NAMA.forEach((n) => { if (gabung[n].every((r) => 'fasa' in r)) gabung[n].sort(susun); });
+        namaFail = [...new Set([...(lama.fail ? String(lama.fail).split(' + ') : []), c.nama])].join(' + ');
+        nota = [...baru].sort().join(', ');
+      }
+      const e = {key, kumpulan: kump, tahun, at: new Date().toISOString(), fail: namaFail, data: gabung};
       S.ada.set(key, e);
       if (STATIK && window.indexedDB) { try { await dbSimpan(e); } catch (x) { mesejSimpan('Data dipaparkan tetapi gagal disimpan dalam pelayar ini.'); } }
       S.calon = null;
