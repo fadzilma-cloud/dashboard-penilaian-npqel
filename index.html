@@ -250,6 +250,11 @@ th[aria-sort="descending"] .npq-sort::after { content: " \2193"; color: var(--co
 .npq-auth-kotak { max-width:440px; }
 .npq-auth-borang { display:flex; flex-direction:column; gap:12px; }
 .npq-auth-borang .npq-input { width:100%; box-sizing:border-box; }
+.npq-tabrow { display:flex; align-items:flex-start; gap:12px; }
+.npq-tabrow .npq-tabs { flex:1 1 auto; min-width:0; }
+.npq-auth-bar { flex:0 0 auto; display:flex; align-items:center; gap:8px; margin-left:auto; padding-bottom:6px; }
+.npq-btn-kecil { padding:6px 12px; font-size:.85rem; }
+@media (max-width:560px){ .npq-tabrow { flex-direction:column; gap:0; } .npq-tabrow .npq-tabs { width:100%; } .npq-auth-bar { margin-left:0; align-self:flex-end; padding-bottom:0; } .npq-hanya-lebar { display:inline; } .npq-pengurus { display:none !important; } }
 @media (max-width:560px){ .npq-big { padding-right:0; } .npq-gauge { display:none; } .npq-hero { border-radius:16px; } }
 @media (prefers-reduced-motion:reduce){ .npq *,.npq *::before,.npq *::after { animation:none !important; transition:none !important; } }
 
@@ -327,12 +332,10 @@ th[aria-sort="descending"] .npq-sort::after { content: " \2193"; color: var(--co
   </label>
   <button type="button" class="npq-btn" id="npq-reset">Set semula penapis</button>
   <button type="button" class="npq-btn npq-btn-utama" id="npq-buka-muat" hidden>Muat naik data</button>
-  <button type="button" class="npq-btn" id="npq-log-masuk">Log masuk Pengurus</button>
-  <span class="npq-pengurus" id="npq-nama-pengurus" hidden></span>
-  <button type="button" class="npq-btn" id="npq-log-keluar" hidden>Log keluar</button>
 </div>
 <div class="npq-chips" id="npq-chips" data-draw="cip-penapis" aria-live="polite"></div>
 
+<div class="npq-tabrow">
 <nav class="npq-tabs" id="npq-tab" aria-label="Bahagian dashboard">
   <span class="npq-ink" aria-hidden="true"></span>
   <button type="button" class="npq-tab" data-tab="ringkasan" aria-selected="true">Ringkasan</button>
@@ -343,6 +346,12 @@ th[aria-sort="descending"] .npq-sort::after { content: " \2193"; color: var(--co
   <button type="button" class="npq-tab" data-tab="peserta" aria-selected="false">Peserta dan jadual</button>
   <button type="button" class="npq-tab" data-tab="nota" aria-selected="false">Nota data</button>
 </nav>
+<div class="npq-auth-bar" role="group" aria-label="Akaun Pengurus">
+  <span class="npq-pengurus" id="npq-nama-pengurus" hidden></span>
+  <button type="button" class="npq-btn npq-btn-kecil" id="npq-log-masuk">Log masuk<span class="npq-hanya-lebar"> Pengurus</span></button>
+  <button type="button" class="npq-btn npq-btn-kecil" id="npq-log-keluar" hidden>Log keluar</button>
+</div>
+</div>
 </div>
 
 <!-- ============ RINGKASAN ============ -->
