@@ -14,5 +14,8 @@ Dashboard interaktif satu halaman (HTML statik) bagi laporan i-Penilaian IAB: sk
 
 Fail dibaca dalam pelayar dan disimpan dalam pelayar pengguna sahaja (IndexedDB); tiada data dihantar ke pelayan. `templat/Contoh_Data_SRGH5_2026.xlsx` ialah data SRGH5 dalam format yang sama.
 
-## Alat menukar PDF kepada Excel
-Lihat [`alat/README.md`](alat/README.md). Alat ini menukar PDF i-Penilaian secara pukal kepada satu fail xlsx yang boleh dimuat naik ke dashboard.
+## Muat naik terus daripada PDF
+Dalam modal **Muat naik data**, bahagian "Atau tukar terus daripada PDF i-Penilaian": pilih semua PDF (atau folder) satu kumpulan, semak fasa program, isi kumpulan dan tahun, kemudian **Simpan dan papar**. PDF dibaca dalam pelayar (pdf.js, folder `pdfjs/`) dan tidak dihantar ke mana-mana. Fasa dikesan daripada kandungan PDF atau nama folder; jika tidak pasti, anda perlu memilihnya.
+
+## Alat Python (pilihan)
+Lihat [`alat/README.md`](alat/README.md) untuk menukar PDF kepada fail xlsx di luar dashboard.

@@ -279,6 +279,10 @@ th[aria-sort="descending"] .npq-sort::after { content: " \2193"; color: var(--co
 
 .npq-merah:empty { display:none; }
 
+.npq-progres{width:100%;height:8px;accent-color:var(--acc)}
+#npq-blok-pdf{margin-top:var(--cds-gap-md,12px);padding-top:var(--cds-gap-md,12px);border-top:1px solid var(--color-border-line)}
+#npq-blok-pdf select{min-width:9.5rem}
+
 </style></head><body><div id="dash-root"><meta name="dash-one-writer">
 
 
@@ -652,6 +656,19 @@ th[aria-sort="descending"] .npq-sort::after { content: " \2193"; color: var(--co
       <label class="npq-field npq-grow"><span>Fail Excel (.xlsx)</span>
         <input class="npq-input" id="npq-fail-muat" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label="Pilih fail Excel">
       </label>
+    </div>
+    <div id="npq-blok-pdf" hidden>
+      <h3 class="npq-h3">Atau tukar terus daripada PDF i-Penilaian</h3>
+      <p class="npq-note">Pilih semua PDF bagi satu kumpulan sekaligus (BK15a, BK15b, BK15c, BK15d, BK30, BK38 dan BK64). PDF dibaca dalam pelayar ini sahaja dan tidak dihantar ke mana-mana. Daripada BK64 hanya kiraan jawatan, gred, negeri dan jenis tempat bertugas diambil; nama, no. kad pengenalan, telefon dan e-mel tidak dibaca. Semak amaran dan bandingkan beberapa nilai dengan PDF asal sebelum menggunakannya.</p>
+      <div class="npq-filters">
+        <label class="npq-field npq-grow"><span>Fail PDF (boleh pilih banyak)</span>
+          <input class="npq-input" id="npq-fail-pdf" type="file" accept=".pdf,application/pdf" multiple aria-label="Pilih fail PDF">
+        </label>
+        <label class="npq-field npq-grow"><span>Atau pilih folder</span>
+          <input class="npq-input" id="npq-folder-pdf" type="file" webkitdirectory multiple aria-label="Pilih folder PDF">
+        </label>
+      </div>
+      <div data-draw="ringkas-pdf" class="npq-ringkas-muat"></div>
     </div>
     <div class="npq-filters">
       <label class="npq-field"><span>Kumpulan</span>
@@ -1556,6 +1573,443 @@ dash.calc('terbuka_ringkas', {
   }
 })();
 </script>
+<script>// Penukar PDF i-Penilaian -> dataset dashboard (berjalan dalam pelayar menggunakan pdf.js).
+// Port daripada alat Python npqel_pdf_ke_xlsx.py; hasil diuji sepadan dengan data SRGH5.
+const NPQ_PDF = (() => {
+  'use strict';
+  const norm = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+  const ns = (s) => String(s == null ? '' : s).replace(/\s/g, '');
+  const intu = (x) => (x != null && /^\d+$/.test(String(x)) ? parseInt(x, 10) : null);
+  const natkey = (s) => String(s).split(/(\d+)/).map((x) => (/^\d+$/.test(x) ? [0, parseInt(x, 10)] : [1, x]));
+  const cmpNat = (a, b) => {
+    const A = natkey(a), B = natkey(b);
+    for (let i = 0; i < Math.min(A.length, B.length); i++) {
+      if (A[i][0] !== B[i][0]) return A[i][0] - B[i][0];
+      if (A[i][1] < B[i][1]) return -1;
+      if (A[i][1] > B[i][1]) return 1;
+    }
+    return A.length - B.length;
+  };
+  const BULAN = {JAN: 1, FEB: 2, MAC: 3, MAR: 3, APR: 4, MEI: 5, JUN: 6, JUL: 7, OGO: 8, AUG: 8, SEP: 9, OKT: 10, OCT: 10, NOV: 11, DIS: 12, DEC: 12};
+  const p2 = (n) => String(n).padStart(2, '0');
+  const isoDmy = (s) => { const m = /(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s || ''); return m ? `${m[3]}-${p2(m[2])}-${p2(m[1])}` : null; };
+  const isoMalay = (s) => {
+    const m = /(\d{1,2})\s+([A-Za-z]{3,})\.?,?\s+(\d{4})/.exec(s || '');
+    if (!m || !BULAN[m[2].slice(0, 3).toUpperCase()]) return null;
+    return `${m[3]}-${p2(BULAN[m[2].slice(0, 3).toUpperCase()])}-${p2(m[1])}`;
+  };
+  const kodBorang = (t) => { const m = /\bBK\s*-?\s*(\d+[a-d]?)\b/.exec(t.slice(0, 1500)); return m ? 'BK' + m[1] : null; };
+  const fld = (src, lab, end) => { const m = new RegExp(lab + '\\s*:\\s*(.*?)\\s*(?=' + end + ')', 's').exec(src); return m ? norm(m[1]) : null; };
+
+  // ---------- Item teks -> baris ----------
+  async function muatHalaman(doc) {
+    const out = [];
+    for (let n = 1; n <= doc.numPages; n++) {
+      const pg = await doc.getPage(n);
+      const tc = await pg.getTextContent();
+      const items = tc.items.filter((i) => i.str && i.str.trim()).map((i) => ({s: i.str.trim(), x: i.transform[4], y: i.transform[5], w: i.width}));
+      out.push({n, items, tinggi: pg.view[3]});
+    }
+    return out;
+  }
+  function barisDari(items) {
+    const a = [...items].sort((p, q) => q.y - p.y || p.x - q.x);
+    const baris = [];
+    for (const it of a) {
+      const b = baris.find((r) => Math.abs(r.y - it.y) <= 2.5);
+      if (b) b.items.push(it); else baris.push({y: it.y, items: [it]});
+    }
+    baris.sort((p, q) => q.y - p.y);
+    for (const b of baris) {
+      b.items.sort((p, q) => p.x - q.x);
+      let t = '', prev = null;
+      for (const it of b.items) { t += (prev && it.x - (prev.x + prev.w) > 1 ? ' ' : prev ? ' ' : '') + it.s; prev = it; }
+      b.teks = t;
+    }
+    return baris;
+  }
+  const teksPenuh = (hal) => hal.map((h) => barisDari(h.items).map((b) => b.teks).join('\n')).join('\n');
+
+  // ---------- Borang berasaskan teks ----------
+  function bk15a(t, fn, unread) {
+    const r = {fail: fn};
+    r.topik = fld(t, 'Topik', 'Tempat Kursus'); r.pensyarah = fld(t, 'Nama Pensyarah', 'Tarikh Mula');
+    r.bil_hadir = intu(fld(t, 'Bil Peserta Hadir', 'Bil Responden')); r.bil_responden = intu(fld(t, 'Bil Responden', '\\n'));
+    const m = /^\s*((?:\d\.\d{2}\s+){10}\d\.\d{2})\s*$/m.exec(t);
+    if (m) {
+      const ks = ['L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8', 'purata_pengisian', 'purata_keupayaan', 'purata_keseluruhan'];
+      m[1].trim().split(/\s+/).forEach((x, i) => { r[ks[i]] = parseFloat(x); });
+    } else unread.push([fn, 'baris purata L1-L8']);
+    for (const [k, lab] of [['pct_keseluruhan', 'Rumusan Keseluruhan Penilaian'], ['pct_pengisian', 'Elemen Pengisian Sesi Latihan'], ['pct_keupayaan', 'Elemen Keupayaan Pensyarah']]) {
+      const mm = new RegExp(lab + '\\s*:\\s*([\\d.]+)%\\s*Tahap\\s*:\\s*([^\\n]+)').exec(t);
+      if (mm) { r[k] = parseFloat(mm[1]); r[k.replace('pct', 'tahap')] = norm(mm[2]); } else unread.push([fn, lab]);
+    }
+    return r;
+  }
+  function bk15b(t, fn, unread) {
+    const h = {fail: fn, kod_program: fld(t, 'Kod Program', 'Nama Program')};
+    const m = /Prestasi\s*:\s*([\d.]+)%\s*\(Min\s*=\s*([\d.]+)\)/.exec(t);
+    h.prestasi_pct_header = m ? parseFloat(m[1]) : null; h.min_header = m ? parseFloat(m[2]) : null;
+    const w = [];
+    const re = /^\s*(W\d+)\s+\((\d+)\)\s+([\d.]+)\s*%\s*\((\d+)\)\s*(.*?)\s*=\s*([\d.]+)\s*$/gm;
+    let a;
+    while ((a = re.exec(t))) w.push({item: a[1], bil_menjawab: +a[2], peratus: parseFloat(a[3]), bil_dalam_kurungan: +a[4], perkara: a[5], min: parseFloat(a[6])});
+    if (w.length !== 24) unread.push([fn, `item W: jumpa ${w.length} daripada 24`]);
+    return {h, w};
+  }
+  function bk38(t, fn, unread) {
+    const h = {fail: fn, tempoh: fld(t, '1\\.3\\s+Tempoh Kursus/Program', '\\(Tarikh Lapor|\\n\\s*1\\.4')};
+    let m = /Bilangan Pensyarah Terlibat\s*:\s*(\d+)/.exec(t); h.bil_pensyarah = m ? +m[1] : null;
+    m = /Bil Responden\s*:\s*(\d+)/.exec(t); h.bil_responden = m ? +m[1] : null;
+    const L = [['keseluruhan', '1\\. Rumusan Keseluruhan Penilaian'], ['pengisian', '1\\.1 Penilaian Keseluruhan Pengisian Sesi Latihan'], ['keupayaan', '1\\.2 Penilaian Keseluruhan Keupayaan Pensyarah'], ['khidmat_sokongan', '2\\. Penilaian Keseluruhan Khidmat Sokongan'], ['komposit', '3\\. Komposit Kursus \\(90%\\) dan Khidmat Sokongan\\s*\\(10%\\)']];
+    for (const [k, lab] of L) {
+      m = new RegExp(lab + '\\s+([\\d.]+)\\s+([^\\n]+)').exec(t);
+      h['pct_' + k] = m ? parseFloat(m[1]) : null; h['status_' + k] = m ? norm(m[2]) : null;
+      if (!m) unread.push([fn, 'BK38: ' + lab.replace(/\\/g, '')]);
+    }
+    m = /ditawarkan tempat adalah (\d+) orang dan yang hadir (\d+) orang/.exec(t);
+    h.bil_ditawarkan = m ? +m[1] : null; h.bil_hadir = m ? +m[2] : null;
+    m = /7\. Ulasan Pengurus[^\n]*\n([\s\S]*?)(?=\n\s*8\. Lampiran)/.exec(t); h.ulasan_pengurus = m ? norm(m[1]) : null;
+    return h;
+  }
+
+  // ---------- Borang berjadual (geometri) ----------
+  // Pengepala/pengaki cetakan pelayar (tarikh-masa, tajuk tab, URL, nombor halaman) dibuang mengikut kandungan, bukan kedudukan,
+  // kerana baris jadual yang terpotong di sempadan halaman berada di kawasan margin.
+  const bising = (i) => /^https?:/.test(i.s) || /^MUKA SURAT\s+\d+\s+DARIPADA\s+\d+$/i.test(i.s) || /^\d{1,2}\/\d{1,2}\/\d{2,4},?(\s+\d{1,2}:\d{2}(\s*[AP]M)?)?$/.test(i.s) || /^\d{1,2}:\d{2}\s*[AP]M$/.test(i.s) || /^i-Penilaian: Senarai Program/.test(i.s) || /^\d+\/\d+$/.test(i.s) || /^\d{1,2}\/\d{1,2}\/\d{2,4},?\s+\d{1,2}:\d{2}/.test(i.s);
+  const digit = (s) => /^\d+$/.test(s);
+
+  function bk15c(hal, t, fn, unread) {
+    if (/Belum Dimasukkan/.test(t)) return [];
+    const out = []; let cur = null, rek = null, hdr = null, sempadan = 308.5;
+    for (const h of hal) {
+      let items = h.items.filter((i) => !bising(i));
+      const bil = items.find((i) => i.s === 'BIL'), v12 = items.find((i) => i.s === 'V12'), v13 = items.find((i) => i.s === 'V13');
+      let yAtas = Infinity;
+      if (bil) {
+        yAtas = bil.y - 3;
+        if (v12 && v13) sempadan = ((v12.x + v12.w / 2) + (v13.x + v13.w / 2)) / 2;
+      }
+      items = items.filter((i) => i.y < yAtas);
+      let baris = barisDari(items);
+      // buang baris soalan pengepala sebelum kandungan pertama
+      let mula = 0;
+      while (mula < baris.length && /Apakah|Mengapa|untuk diri|penambahbaikan|sangat bernilai|yang perlu/.test(baris[mula].teks) && !digit(baris[mula].items[0].s) && !/^TAJUK KULIAH/.test(baris[mula].teks)) mula++;
+      if (bil) baris = baris.slice(mula);
+      for (const b of baris) {
+        const first = b.items[0];
+        const col0 = b.items.filter((i) => digit(i.s) && i.x < 105);
+        if (/^TAJUK KULIAH/.test(b.teks)) {
+          cur = {teks: b.teks}; rek = null; hdr = cur; continue;
+        }
+        if (/^Tiada Maklum Balas/.test(b.teks)) { rek = null; hdr = null; continue; }
+        if (!col0.length && first.x < 84 && hdr) { hdr.teks += ' ' + b.teks; continue; } // sambungan pengepala TAJUK KULIAH
+        if (col0.length) {
+          hdr = null;
+          const rest = b.items.filter((i) => i !== col0[0]);
+          rek = {bil: parseInt(col0[0].s, 10), a: [], b: []};
+          out.push(Object.assign(rek, {cur, hal: h.n}));
+          for (const i of rest) (i.x < sempadan ? rek.a : rek.b).push(i.s);
+        } else if (rek) {
+          hdr = null;
+          for (const i of b.items) (i.x < sempadan ? rek.a : rek.b).push(i.s);
+        } else if (b.items.length) unread.push([fn, `baris BK15c tidak dikenali hlm ${h.n}: ${b.teks.slice(0, 40)}`]);
+      }
+    }
+    return out.map((r) => {
+      let topik = null, ph = null;
+      if (r.cur) {
+        const m = /^TAJUK KULIAH:\s*(.*),\s*TENAGA PENGAJAR:\s*(.*)$/.exec(norm(r.cur.teks));
+        if (m) { topik = m[1].trim(); ph = m[2].trim(); } else { topik = norm(r.cur.teks); ph = null; }
+      }
+      return {fail: fn, halaman: r.hal, topik, pensyarah: ph, bil: r.bil, V12: norm(r.a.join(' ')), V13: norm(r.b.join(' '))};
+    });
+  }
+
+  function bk15d(hal, fn, unread) {
+    const out = []; let rek = null;
+    for (const h of hal) {
+      let items = h.items.filter((i) => !bising(i));
+      const bil = items.find((i) => i.s === 'BIL');
+      if (bil) items = items.filter((i) => i.y < bil.y - 3);
+      for (const b of barisDari(items)) {
+        const col0 = b.items.filter((i) => digit(i.s) && i.x < 105);
+        if (col0.length) { rek = {fail: fn, halaman: h.n, bil: parseInt(col0[0].s, 10), r: []}; out.push(rek); b.items.filter((i) => i !== col0[0]).forEach((i) => rek.r.push(i.s)); }
+        else if (rek) b.items.forEach((i) => rek.r.push(i.s));
+      }
+    }
+    if (!out.length) unread.push([fn, 'tiada baris respons BK15d']);
+    return out.map((r) => ({fail: r.fail, halaman: r.halaman, bil: r.bil, respons: norm(r.r.join(' '))}));
+  }
+
+  function bk30(hal, t, fn, unread) {
+    const h = {fail: fn, tempoh: fld(t, '3\\. Tempoh Kursus/Program', '4\\.'), tempat: fld(t, '2\\. Tempat Kursus/Program', '3\\.')};
+    for (const [k, lab] of [['bil_ditawarkan', 'Bilangan Peserta Yang Ditawarkan Tempat'], ['bil_hadir', 'Bilangan Peserta Yang Hadir'], ['bil_responden', '7\\.4 Bil Responden']]) {
+      const m = new RegExp(lab + '\\s*:\\s*(\\d+)').exec(t); h[k] = m ? +m[1] : null;
+    }
+    for (const [k, lab] of [['pct_pengisian', 'Pengisian Sesi Latihan'], ['pct_keupayaan', 'Keupayaan Pensyarah'], ['pct_khidmat_sokongan', 'Khidmat Sokongan']]) {
+      const m = new RegExp('Penilaian Keseluruhan ' + lab + '\\s*:\\s*([\\d.]+)%').exec(t); h[k] = m ? parseFloat(m[1]) : null;
+    }
+    const chg = [];
+    let m = /8\. Laporan perubahan[\s\S]*?:\s*\n([\s\S]*?)(?=\n\s*9\.\s*Skor Pensyarah)/.exec(t);
+    if (m) for (let ch of ('\n' + m[1]).split(/\n\s*-\s+(?=SESI PENGAJARAN)/)) {
+      ch = norm(ch).replace(/^[- ]+/, '').trim();
+      if (ch) chg.push({fail: fn, perubahan: ch});
+    }
+    // jadual skor pensyarah
+    const p = []; let rek = null, mulaJadual = false;
+    for (const hl of hal) {
+      let items = hl.items.filter((i) => !bising(i));
+      for (const b of barisDari(items)) {
+        if (!mulaJadual) {
+          if (/Skor Pensyarah/.test(b.teks)) mulaJadual = 'cari';
+          continue;
+        }
+        const col0 = b.items.filter((i) => digit(i.s) && i.x < 70);
+        if (col0.length) {
+          mulaJadual = 'baris';
+          rek = {fail: fn, bil: parseInt(col0[0].s, 10), ph: [], tj: [], sk: [], y: b.y};
+          p.push(rek);
+          for (const i of b.items) if (i !== col0[0]) (i.x < 200 ? rek.ph : i.x < 500 ? rek.tj : rek.sk).push(i.s);
+        } else if (rek && mulaJadual === 'baris' && rek.y - b.y < 30) {
+          for (const i of b.items) (i.x < 200 ? rek.ph : i.x < 500 ? rek.tj : rek.sk).push(i.s);
+        }
+      }
+    }
+    const pp = p.map((r) => { const sk = norm(r.sk.join(' ')); return {fail: fn, bil: r.bil, pensyarah: norm(r.ph.join(' ')), tajuk: norm(r.tj.join(' ')), skor: /^[\d.]+$/.test(sk) ? parseFloat(sk) : null}; });
+    if (h.tempoh == null) unread.push([fn, 'tempoh kursus BK30']);
+    return {h, chg, p: pp};
+  }
+
+  const STATES = ['JOHOR', 'KEDAH', 'KELANTAN', 'MELAKA', 'NEGERI SEMBILAN', 'PAHANG', 'PERAK', 'PERLIS', 'PULAU PINANG', 'SABAH', 'SARAWAK', 'SELANGOR', 'TERENGGANU', 'KUALA LUMPUR', 'LABUAN', 'PUTRAJAYA'];
+  function bk64(hal, fn, unread) {
+    // Hanya jawatan, gred, negeri dan jenis tempat bertugas dibaca. Nama, No. KP, telefon dan e-mel diabaikan.
+    const out = [];
+    for (const hl of hal) {
+      const items = hl.items.filter((i) => !bising(i));
+      const hdr = items.find((i) => i.s === 'TEMPAT') || items.find((i) => /^TEMPAT BERTUGAS/.test(i.s));
+      const cat = items.find((i) => i.s === 'CATATAN');
+      const xT = hdr ? hdr.x - 100 : 262, xC = cat ? cat.x - 15 : 506;
+      const jaw = items.filter((i) => i.s === 'JAWATAN:').sort((a, b) => b.y - a.y);
+      jaw.forEach((j, k) => {
+        const atas = j.y + 15, bawah = k + 1 < jaw.length ? jaw[k + 1].y + 15 : -1e9;
+        const dalam = items.filter((i) => i.y < atas && i.y >= bawah);
+        const nama = barisDari(dalam.filter((i) => i.x > 100 && i.x < xT));
+        let sedang = '', jaw_ = [], gred = [];
+        for (const b of nama) {
+          if (b.teks.startsWith('JAWATAN:')) { sedang = 'j'; continue; }
+          if (b.teks.startsWith('GRED:')) { sedang = 'g'; continue; }
+          if (b.teks.startsWith('NO TEL:')) { sedang = 't'; continue; }
+          if (sedang === 'j') jaw_.push(b.teks); else if (sedang === 'g') gred.push(b.teks);
+        }
+        const tb = norm(barisDari(dalam.filter((i) => i.x >= xT && i.x < xC)).map((b) => b.teks).join(' ')).toUpperCase();
+        const st = STATES.filter((s) => new RegExp('\\b' + s + '\\b').test(tb));
+        let jenis;
+        if (!tb.replace(/^[ ,]+|[ ,]+$/g, '')) jenis = '(kosong dalam laporan)';
+        else if (/^(SK\b|SEKOLAH KEBANGSAAN)/.test(tb)) jenis = 'Sekolah Kebangsaan (SK)';
+        else if (/^(SJK|SEKOLAH JENIS)/.test(tb)) jenis = 'Sekolah Jenis Kebangsaan (SJK)';
+        else if (tb.startsWith('PEJABAT PELAJARAN')) jenis = 'Pejabat Pelajaran Daerah';
+        else if (tb.startsWith('JABATAN PELAJARAN')) jenis = 'Jabatan Pelajaran';
+        else jenis = 'Lain-lain';
+        out.push({jawatan: norm(jaw_.join(' ')) || null, gred: norm(gred.join(' ')) || null, negeri: st.length ? st[st.length - 1] : 'TIADA MAKLUMAT', jenis_tempat_bertugas: jenis});
+      });
+    }
+    if (!out.length) unread.push([fn, 'tiada baris peserta BK64']);
+    return out;
+  }
+
+  // ---------- Baca satu PDF ----------
+  async function bacaPdf(pdfjs, data, nama) {
+    const fn = nama.split('/').pop(); const unread = [];
+    const hm = /Fasa\s*([1-9])\b/i.exec(nama);
+    const R = {nama, fail: fn, jenis: null, mula: null, kod: null, hint: hm ? +hm[1] : null, data: null, tidak_dibaca: unread};
+    const doc = await pdfjs.getDocument({data, useSystemFonts: true, isEvalSupported: false}).promise;
+    try {
+      const hal = await muatHalaman(doc); const t = teksPenuh(hal); const code = kodBorang(t); R.jenis = code;
+      if (['BK15a', 'BK15b', 'BK15c', 'BK15d'].includes(code)) {
+        R.mula = isoDmy(fld(t, 'Tarikh Mula', 'Tarikh Tamat') || '');
+        R.kod = fld(t, 'Kod (?:Kursus/)?Program', 'Nama (?:Kursus|Program)');
+      }
+      if (code === 'BK15a') R.data = bk15a(t, fn, unread);
+      else if (code === 'BK15b') R.data = bk15b(t, fn, unread);
+      else if (code === 'BK15c') R.data = bk15c(hal, t, fn, unread);
+      else if (code === 'BK15d') R.data = bk15d(hal, fn, unread);
+      else if (code === 'BK30') { R.data = bk30(hal, t, fn, unread); R.mula = isoDmy(R.data.h.tempoh || ''); }
+      else if (code === 'BK38') {
+        R.data = bk38(t, fn, unread); R.mula = isoDmy(R.data.tempoh || '');
+        const m = /\bFasa\s*([1-9])\b/.exec(t.slice(0, 900)); R.fasa_teks = m ? +m[1] : null;
+      } else if (code === 'BK64') {
+        R.data = bk64(hal, fn, unread);
+        let m = /KOD KURSUS\s*:\s*(\S+)/.exec(t); R.kod = m ? m[1] : null;
+        m = /TARIKH\s*:\s*([^\n]+?)\s*-\s*\d/.exec(t); R.mula = m ? isoMalay(m[1]) : null;
+      }
+    } finally { try { await doc.destroy(); } catch (e) { /* abai */ } }
+    return R;
+  }
+
+  // ---------- Penyatuan ----------
+  const seragam = (t) => {
+    t = String(t || '').replace(/\s+/g, ' ').trim();
+    const m = /^(\d+(?:\.\d+)*)[.,]?\s*:?\s*(.*)$/.exec(t);
+    if (m) t = `${m[1]} ${m[2]}`;
+    return t.replace(/\s+:/g, ':');
+  };
+  const SUB = {};
+  [[[1, 2, 3], 'Bilik Latihan'], [[4, 5, 6], 'Pusat Sumber'], [[7, 8], 'Kemudahan/Perkhidmatan ICT'], [[9, 10], 'Tandas'], [[11, 12, 13, 14], 'Tempat Penginapan'], [[15, 16, 17, 18, 19], 'Sajian'], [[20, 21], 'Kemudahan/Perkhidmatan Pengangkutan IAB'], [[22, 23, 24], 'Pengurus Kursus']].forEach(([a, n]) => a.forEach((i) => { SUB['W' + i] = n; }));
+  const SUBORD = {}; [...new Set(Object.values(SUB))].forEach((v, i) => { SUBORD[v] = i + 1; });
+  const NAMA = ['fasa', 'sesi', 'sokongan', 'terbuka_sesi', 'terbuka_sokongan', 'peserta', 'perubahan'];
+
+  function tentukanFasa(rekod, peta) {
+    peta = peta || {}; const amaran = [], ralat = [];
+    const prog = new Map();
+    [...rekod.filter((r) => r.mula)].sort((a, b) => (a.mula < b.mula ? -1 : a.mula > b.mula ? 1 : cmpNat(a.nama, b.nama))).forEach((r) => {
+      if (!prog.has(r.mula)) prog.set(r.mula, {mula: r.mula, rekod: [], kod: null});
+      prog.get(r.mula).rekod.push(r);
+    });
+    const P = [...prog.values()];
+    for (const p of P) {
+      p.kod = (p.rekod.find((r) => r.kod) || {}).kod || null;
+      let sbr = null, asas = null;
+      if (peta[p.mula]) { sbr = peta[p.mula]; asas = 'pilihan pengguna'; }
+      else {
+        const t38 = p.rekod.filter((r) => r.jenis === 'BK38' && r.fasa_teks).map((r) => r.fasa_teks);
+        const hints = {}; p.rekod.forEach((r) => { if (r.hint) hints[r.hint] = (hints[r.hint] || 0) + 1; });
+        const top = Object.entries(hints).sort((a, b) => b[1] - a[1])[0];
+        if (t38.length) { sbr = t38[0]; asas = 'teks "Fasa N" dalam BK38'; } else if (top) { sbr = +top[0]; asas = 'nama folder/fail'; }
+      }
+      p.fasa = sbr; p.asas = asas;
+    }
+    const nyata = P.filter((p) => p.fasa == null);
+    if (nyata.length) {
+      const diguna = new Set(P.filter((p) => p.fasa).map((p) => p.fasa));
+      const bebas = [1, 2, 3].filter((n) => !diguna.has(n));
+      nyata.forEach((p, i) => {
+        if (i < bebas.length) {
+          p.fasa = bebas[i]; p.asas = 'cadangan sahaja (susunan tarikh mula) - belum disahkan'; p.andaian = true;
+          ralat.push(`Program bermula ${p.mula}: fasa tidak dinyatakan dalam PDF atau nama folder. Cadangan mengikut susunan tarikh ialah Fasa ${bebas[i]}, tetapi belum disahkan. Pilih fasa pada jadual program.`);
+        } else { p.fasa = null; ralat.push(`Program bermula ${p.mula}: tidak dapat menentukan fasa. Pilih fasa pada jadual program.`); }
+      });
+    }
+    const cnt = {}; P.forEach((p) => { if (p.fasa) cnt[p.fasa] = (cnt[p.fasa] || 0) + 1; });
+    for (const [n, c] of Object.entries(cnt)) if (c > 1) ralat.push(`Lebih daripada satu program dikesan sebagai Fasa ${n} (${P.filter((p) => p.fasa == n).map((p) => p.mula).join(', ')}). Satu muat naik hanya menerima satu kumpulan; asingkan PDF mengikut kumpulan atau betulkan fasa.`);
+    P.forEach((p) => { if (p.fasa && ![1, 2, 3].includes(p.fasa)) ralat.push(`Program ${p.mula}: fasa ${p.fasa} tidak sah.`); });
+    for (const r of rekod.filter((r) => !r.mula && r.data)) {
+      let tgt = P.filter((p) => r.hint && p.fasa === r.hint);
+      if (!tgt.length && P.length === 1) { tgt = P; amaran.push(`${r.nama} (${r.jenis}): tarikh tidak dapat dibaca; dipadankan dengan satu-satunya program.`); }
+      if (tgt.length) tgt[0].rekod.push(r); else ralat.push(`${r.nama} (${r.jenis}): tidak dapat dipadankan dengan mana-mana program (tarikh dan fasa tidak dikesan).`);
+    }
+    return {prog: P, amaran, ralat};
+  }
+
+  function binaDataset(prog) {
+    const D = {}; NAMA.forEach((n) => { D[n] = []; }); const amaran = [];
+    const no = {ts: 0, tk: 0, pr: 0};
+    for (const p of [...prog].filter((p) => [1, 2, 3].includes(p.fasa)).sort((a, b) => a.fasa - b.fasa)) {
+      const f = p.fasa, Fl = 'Fasa ' + f; const by = {};
+      [...p.rekod].sort((a, b) => cmpNat(a.nama, b.nama)).forEach((r) => { (by[r.jenis] = by[r.jenis] || []).push(r); });
+      const B = (j) => by[j] || [];
+      for (const j of ['BK15b', 'BK30', 'BK38']) {
+        if (B(j).length > 1) amaran.push(`${Fl}: ${B(j).length} fail ${j} dikesan; hanya ${B(j)[0].nama} digunakan.`);
+        if (!B(j).length) amaran.push(`${Fl}: tiada fail ${j}; medan berkaitan dibiarkan kosong.`);
+      }
+      const b15 = B('BK15b')[0] ? B('BK15b')[0].data : null, b30 = B('BK30')[0] ? B('BK30')[0].data : null, b38 = B('BK38')[0] ? B('BK38')[0].data : null;
+      const s15 = B('BK15a').map((r) => r.data);
+      s15.forEach((x) => { x._k = ns(x.pensyarah) + '|' + ns(x.topik); });
+      const pool = new Map(); s15.forEach((x) => { if (!pool.has(x._k)) pool.set(x._k, []); pool.get(x._k).push(x); });
+      const sesi = []; const pakai = new Set();
+      if (b30 && b30.p.length) {
+        for (const q of b30.p) {
+          const k = ns(q.pensyarah) + '|' + ns(q.tajuk); const arr = pool.get(k); const x = arr && arr.length ? arr.shift() : null;
+          if (x) pakai.add(x);
+          sesi.push([q.bil, q, x]);
+        }
+        let sisa = s15.filter((x) => !pakai.has(x));
+        const SIG = (x) => ['L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8', 'purata_keseluruhan', 'bil_hadir', 'bil_responden'].map((k) => x[k]).join('|');
+        const tersedia = sesi.filter((s) => s[2]).map((s) => s[2]);
+        for (const x of [...sisa]) {
+          const kembar = tersedia.find((y) => y._k === x._k && SIG(y) === SIG(x));
+          if (kembar) {
+            sisa = sisa.filter((z) => z !== x);
+            const tbl = sesi.filter((s) => s[1] && !s[2]).map((s) => s[1].pensyarah + ' / ' + s[1].tajuk);
+            amaran.push(`${Fl}: ${x.fail} mengandungi data yang SAMA dengan ${kembar.fail} (topik, pensyarah dan semua skor) lalu dianggap pendua dan tidak dimasukkan.` + (tbl.length ? ` Jadual BK30 mempunyai baris tanpa BK15a: ${tbl.slice(0, 3).join('; ')}. Semak sama ada fail ini sebenarnya milik sesi tersebut.` : ''));
+          }
+        }
+        if (sisa.length) {
+          amaran.push(`${Fl}: ${sisa.length} fail BK15a tidak dipadankan dengan jadual BK30 (ditambah pada hujung): ${sisa.slice(0, 5).map((x) => x.fail).join('; ')}`);
+          const n0 = Math.max(0, ...b30.p.map((q) => q.bil));
+          sisa.forEach((x, i) => sesi.push([n0 + i + 1, null, x]));
+        }
+      } else {
+        if (s15.length) amaran.push(`${Fl}: BK30 tiada/kosong; sesi dibina daripada BK15a sahaja (nombor sesi mengikut susunan nama fail).`);
+        s15.forEach((x, i) => sesi.push([i + 1, null, x]));
+      }
+      const ses = [];
+      for (const [bil, q, x] of sesi) {
+        const t = seragam(x ? x.topik : q.tajuk); const ph = (q && q.pensyarah) || x.pensyarah;
+        const r = {id: `F${f}-${p2(bil)}`, fasa: Fl, modul: null, topik: t, topik_asal: (q && q.tajuk) || x.topik, pensyarah: ph, bil_hadir: x ? x.bil_hadir : null, bil_responden: x ? x.bil_responden : null};
+        for (const k of ['L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8', 'purata_pengisian', 'purata_keupayaan', 'purata_keseluruhan']) r[k] = x && x[k] != null ? x[k] : null;
+        r.peratus_keseluruhan = x ? (x.pct_keseluruhan != null ? x.pct_keseluruhan : null) : (q ? q.skor : null);
+        r.peratus_pengisian = x && x.pct_pengisian != null ? x.pct_pengisian : null; r.peratus_keupayaan = x && x.pct_keupayaan != null ? x.pct_keupayaan : null;
+        r.tahap = x && x.tahap_keseluruhan ? x.tahap_keseluruhan : null; r.skor_bk30 = q ? q.skor : null;
+        r.sumber_skor = x ? 'BK15a' : 'BK30 (fail BK15a tiada)'; r.fail_sumber = x ? x.fail : q.fail;
+        r.catatan = (x && x.bil_responden && x.bil_hadir && x.bil_responden > x.bil_hadir) ? 'Bil Responden melebihi Bil Peserta Hadir' : (!x ? 'Fail BK15a tiada; butiran L1-L8 tiada' : '');
+        if (x && !q) r.catatan = (r.catatan ? r.catatan + '; ' : '') + 'Tiada dalam jadual BK30';
+        D.sesi.push(r); ses.push(r);
+      }
+      const a = b38 || {}, b = b30 ? b30.h : {}, k = b15 ? b15.h : {};
+      const nz = (v) => (v == null ? null : v);
+      const resp = a.bil_responden != null ? a.bil_responden : nz(b.bil_responden);
+      const ada = !!(resp && resp > 0);
+      const f1 = {fasa: Fl, kod_program: k.kod_program || p.kod, tempoh: (a.tempoh || b.tempoh || '').replace(' HINGGA ', ' hingga '), tempat: nz(b.tempat),
+        bil_ditawarkan: a.bil_ditawarkan != null ? a.bil_ditawarkan : nz(b.bil_ditawarkan), bil_hadir: a.bil_hadir != null ? a.bil_hadir : nz(b.bil_hadir),
+        bil_responden_sesi: resp, bil_pensyarah_terlibat: nz(a.bil_pensyarah), bil_sesi_dinilai: ses.length, bil_pensyarah_dinilai: new Set(ses.map((s) => s.pensyarah)).size, ada_data_sesi: ada ? 'Ya' : 'Tidak'};
+      for (const kk of ['keseluruhan', 'pengisian', 'keupayaan', 'komposit']) {
+        const v = a['pct_' + kk] != null ? a['pct_' + kk] : (['pengisian', 'keupayaan'].includes(kk) ? nz(b['pct_' + kk]) : null);
+        const st = nz(a['status_' + kk]);
+        f1[kk] = ada ? v : null; f1[kk + '_dilaporkan'] = v; f1['status_' + kk] = ada ? st : 'Tiada data'; f1['status_' + kk + '_dilaporkan'] = st;
+      }
+      f1.khidmat_sokongan = a.pct_khidmat_sokongan != null ? a.pct_khidmat_sokongan : nz(b.pct_khidmat_sokongan);
+      f1.status_khidmat_sokongan = nz(a.status_khidmat_sokongan);
+      f1.khidmat_sokongan_bk15b = k.prestasi_pct_header != null ? k.prestasi_pct_header : null; f1.min_khidmat_sokongan_bk15b = k.min_header != null ? k.min_header : null;
+      const ww = b15 ? b15.w : [];
+      const mx = (arr) => (arr.length ? Math.max(...arr) : null);
+      f1.responden_item_kemudahan = mx(ww.filter((w) => !['W22', 'W23', 'W24'].includes(w.item)).map((w) => w.bil_menjawab));
+      f1.responden_item_pengurus = mx(ww.filter((w) => ['W22', 'W23', 'W24'].includes(w.item)).map((w) => w.bil_menjawab));
+      const cRows = B('BK15c').flatMap((r) => r.data), dRows = B('BK15d').flatMap((r) => r.data);
+      f1.respons_terbuka_sesi = cRows.length; f1.respons_terbuka_sokongan = dRows.length;
+      f1.ulasan_pengurus = nz(a.ulasan_pengurus); f1.sumber = ['BK38', 'BK30', 'BK15b'].filter((j) => B(j).length).join(', ');
+      D.fasa.push(f1);
+      for (const w of ww) {
+        const sa = SUB[w.item] || 'Lain-lain';
+        D.sokongan.push({kunci: `${Fl}|${w.item}`, fasa: Fl, item: w.item, no_item: +w.item.slice(1), perkara: w.perkara, sub_aspek: sa, no_sub_aspek: SUBORD[sa] || 99, bil_menjawab: w.bil_menjawab, bil_berpuas_hati: w.bil_dalam_kurungan,
+          peratus: w.bil_menjawab > 0 ? w.peratus : null, min: w.bil_menjawab > 0 ? w.min : null, min_dilaporkan: w.min, fail_sumber: B('BK15b')[0].fail});
+      }
+      for (const x of cRows) { no.ts++; D.terbuka_sesi.push({no: no.ts, fasa: Fl, modul: null, topik: seragam(x.topik), pensyarah: x.pensyarah, bil: x.bil, v12: x.V12, v13: x.V13, tema_v13: null, sumber: `BK15c ${Fl}, hlm ${x.halaman}`}); }
+      for (const x of dRows) { no.tk++; D.terbuka_sokongan.push({no: no.tk, fasa: Fl, bil: x.bil, respons: x.respons, fail_sumber: x.fail}); }
+      if (B('BK30')[0]) for (const x of B('BK30')[0].data.chg) { no.pr++; D.perubahan.push({no: no.pr, fasa: Fl, butiran: x.perubahan, fail_sumber: x.fail}); }
+      const pe = B('BK64').flatMap((r) => r.data);
+      for (const [dim, col] of [['Gred', 'gred'], ['Jawatan', 'jawatan'], ['Negeri', 'negeri'], ['Jenis tempat bertugas', 'jenis_tempat_bertugas']]) {
+        const c = new Map();
+        for (const x of pe) { let v = x[col]; if ((col === 'gred' || col === 'jawatan') && !v) v = '(kosong dalam laporan)'; if (col === 'negeri' && v === 'TIADA MAKLUMAT') v = '(tidak dapat ditentukan)'; c.set(v, (c.get(v) || 0) + 1); }
+        for (const [kat, n] of c) D.peserta.push({kunci: `${Fl}|${dim}|${kat}`, fasa: Fl, dimensi: dim, kategori: kat, bilangan: n});
+      }
+      if (!pe.length) amaran.push(`${Fl}: tiada BK64; tab profil peserta akan kosong.`);
+      const tp = [...new Set([...ses.map((s) => s.topik), ...D.terbuka_sesi.filter((s) => s.fasa === Fl).map((s) => s.topik)])].sort();
+      const nom = (s) => (/^\d+(?:\.\d+)*/.exec(s) || [null])[0];
+      const sim = (a2, b2) => { const A = a2.slice(0, 200), Bb = b2.slice(0, 200); let i = 0; while (i < A.length && i < Bb.length && A[i] === Bb[i]) i++; return i / Math.max(A.length, Bb.length); };
+      for (let i = 0; i < tp.length; i++) for (let j = i + 1; j < tp.length; j++) {
+        if (nom(tp[i]) && nom(tp[j]) && nom(tp[i]) !== nom(tp[j])) continue;
+        if (Math.abs(tp[i].length - tp[j].length) < 4 && sim(tp[i], tp[j]) > 0.9) amaran.push(`${Fl}: topik hampir serupa - semak ejaan: "${tp[i].slice(0, 70)}" / "${tp[j].slice(0, 70)}"`);
+      }
+    }
+    return {D, amaran};
+  }
+
+  return {bacaPdf, tentukanFasa, binaDataset, NAMA, norm};
+})();
+if (typeof module !== 'undefined') module.exports = NPQ_PDF;
+if (typeof window !== 'undefined') window.NPQ_PDF = NPQ_PDF;
+</script>
 <script>// Muat naik data kumpulan lain (fail Excel mengikut templat). Teks tetap berada dalam index.html;
 // skrip ini hanya melukis apa yang ditentukan oleh data dan menetapkan hidden/disabled/value.
 (() => {
@@ -1962,12 +2416,13 @@ dash.calc('terbuka_ringkas', {
     if (!modal) return;
     pemicu = document.activeElement;
     modal.hidden = false;
-    ['ringkas-muat', 'senarai-kumpulan', 'pautan-templat', 'status-simpan', 'mesej-muat'].forEach((n) => dash.draw(n));
+    ['ringkas-muat', 'ringkas-pdf', 'senarai-kumpulan', 'pautan-templat', 'status-simpan', 'mesej-muat'].forEach((n) => dash.draw(n));
     const f = $('npq-fail-muat');
     if (f) f.focus();
   };
   const bersihBorang = () => {
-    ['npq-fail-muat', 'npq-kump-muat', 'npq-tahun-muat'].forEach((id) => { const e = $(id); if (e) e.value = ''; });
+    ['npq-fail-muat', 'npq-fail-pdf', 'npq-folder-pdf', 'npq-kump-muat', 'npq-tahun-muat'].forEach((id) => { const e = $(id); if (e) e.value = ''; });
+    resetPdf();
     S.calon = null;
     S.mesej = '';
     const b = $('npq-simpan-muat');
@@ -1997,6 +2452,7 @@ dash.calc('terbuka_ringkas', {
   if (inFail) {
     inFail.addEventListener('change', async () => {
       const fail = inFail.files && inFail.files[0];
+      resetPdf();
       S.calon = null;
       if (!fail) { tetapSimpan(); dash.draw('ringkas-muat'); return; }
       S.sibuk = true;
@@ -2015,6 +2471,138 @@ dash.calc('terbuka_ringkas', {
       dash.draw('ringkas-muat');
     });
   }
+
+  // ---------- Penukar PDF i-Penilaian (tapak statik sahaja; pdf.js dimuatkan apabila diperlukan) ----------
+  const blokPdf = $('npq-blok-pdf');
+  if (blokPdf && STATIK && window.NPQ_PDF) blokPdf.hidden = false;
+  const PDF = {rekod: [], dilangkau: [], hash: new Map(), nama: new Set(), peta: {}, prog: [], jumlah: 0, baca: 0, semasa: '', sibuk: false, gagal: ''};
+  function resetPdf() {
+    PDF.rekod = []; PDF.dilangkau = []; PDF.hash = new Map(); PDF.nama = new Set(); PDF.peta = {}; PDF.prog = [];
+    PDF.jumlah = 0; PDF.baca = 0; PDF.semasa = ''; PDF.sibuk = false; PDF.gagal = '';
+    if (blokPdf) dash.draw('ringkas-pdf');
+  }
+  let pdfjsLib = null;
+  async function muatPdfjs() {
+    if (pdfjsLib) return pdfjsLib;
+    const lib = await import(new URL('pdfjs/pdf.min.mjs', document.baseURI).href);
+    lib.GlobalWorkerOptions.workerSrc = new URL('pdfjs/pdf.worker.min.mjs', document.baseURI).href;
+    pdfjsLib = lib;
+    return lib;
+  }
+  const cincang = async (buf) => {
+    try {
+      const h = await crypto.subtle.digest('SHA-1', buf);
+      return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    } catch (x) { return null; }
+  };
+  const rehat = () => new Promise((ok) => setTimeout(ok, 0));
+  function kemaskiniCalon() {
+    if (!PDF.rekod.length) {
+      S.calon = {gagal: 'Tiada borang BK15a, BK15b, BK15c, BK15d, BK30, BK38 atau BK64 dikenali dalam fail yang dipilih.', ralat: [], amaran: [], ringkas: []};
+      PDF.prog = [];
+      return;
+    }
+    const t = window.NPQ_PDF.tentukanFasa(PDF.rekod, PDF.peta);
+    PDF.prog = t.prog;
+    const lap = {ralat: [...t.ralat], amaran: [...t.amaran], ringkas: [], kumpulan: null, tahun: null, data: null, nama: `PDF i-Penilaian (${PDF.rekod.length} borang)`};
+    if (!lap.ralat.length) {
+      const {D, amaran} = window.NPQ_PDF.binaDataset(t.prog);
+      lap.amaran.push(...amaran);
+      lap.struktur = false;
+      semakNilai(D, lap);
+      NAMA.forEach((n) => lap.ringkas.push({lembaran: n, baris: D[n].length, status: D[n].length ? 'ok' : 'tiada'}));
+      if (!lap.ralat.length) terbitkan(D);
+      lap.data = D;
+      const th = parseInt((t.prog[0] || {mula: ''}).mula.slice(0, 4), 10);
+      if (Number.isInteger(th)) lap.tahun = th;
+    }
+    S.calon = lap;
+    const ti = $('npq-tahun-muat');
+    if (ti && lap.tahun && !ti.value.trim()) ti.value = String(lap.tahun);
+  }
+  async function prosesPdf(senarai) {
+    const L = [...senarai].filter((f) => /\.pdf$/i.test(f.name));
+    resetPdf();
+    S.calon = null;
+    if (!L.length) { PDF.gagal = 'Tiada fail PDF dipilih.'; dash.draw('ringkas-pdf'); tetapSimpan(); dash.draw('ringkas-muat'); return; }
+    const xl = $('npq-fail-muat'); if (xl) xl.value = '';
+    S.sibuk = PDF.sibuk = true; PDF.jumlah = L.length;
+    tetapSimpan(); dash.draw('ringkas-muat'); dash.draw('ringkas-pdf');
+    try {
+      const lib = await muatPdfjs();
+      for (let i = 0; i < L.length; i++) {
+        const f = L[i]; let nama = f.webkitRelativePath || f.name;
+        PDF.baca = i; PDF.semasa = nama; dash.draw('ringkas-pdf'); await rehat();
+        if (f.size > MAKS_BAIT) { PDF.dilangkau.push([nama, 'terlalu besar (had 30 MB)']); continue; }
+        const buf = await f.arrayBuffer(); const h = await cincang(buf);
+        if (h && PDF.hash.has(h)) { PDF.dilangkau.push([nama, `kandungan sama dengan ${PDF.hash.get(h)} (fail pendua)`]); continue; }
+        const asal = nama; let n = 2;
+        while (PDF.nama.has(nama)) nama = `${asal} #${n++}`;
+        PDF.nama.add(nama); if (h) PDF.hash.set(h, nama);
+        try {
+          const R = await window.NPQ_PDF.bacaPdf(lib, new Uint8Array(buf), nama);
+          if (!R.jenis || R.data == null) PDF.dilangkau.push([nama, 'bukan borang BK15a/b/c/d, BK30, BK38 atau BK64']);
+          else PDF.rekod.push(R);
+        } catch (x) { PDF.dilangkau.push([nama, 'gagal dibuka: ' + (x && x.message ? x.message : x)]); }
+      }
+      PDF.baca = L.length;
+      kemaskiniCalon();
+    } catch (x) {
+      PDF.gagal = 'Pustaka pembaca PDF tidak dapat dimuatkan. Buka dashboard melalui alamat github.io (bukan fail setempat) dan pastikan sambungan internet pada kali pertama. ' + (x && x.message ? x.message : '');
+      S.calon = null;
+    }
+    S.sibuk = PDF.sibuk = false;
+    tetapSimpan(); dash.draw('ringkas-pdf'); dash.draw('ringkas-muat');
+  }
+  dash.draw('ringkas-pdf', (el) => {
+    if (PDF.gagal) return el.replaceChildren(cipta('p', 'npq-merah', PDF.gagal));
+    if (PDF.sibuk) {
+      const p = cipta('progress'); p.max = PDF.jumlah || 1; p.value = PDF.baca;
+      p.className = 'npq-progres';
+      return el.replaceChildren(cipta('p', 'npq-status', `Membaca ${Math.min(PDF.baca + 1, PDF.jumlah)} daripada ${PDF.jumlah}: ${PDF.semasa}`), p);
+    }
+    if (!PDF.jumlah) return el.replaceChildren();
+    const nod = [cipta('p', 'npq-status', `${PDF.rekod.length} borang dikenali daripada ${PDF.jumlah} fail.`)];
+    if (PDF.prog.length) {
+      const tb = cipta('tbody');
+      const hd = cipta('thead'); const hr = cipta('tr');
+      ['Tarikh mula', 'Kod program', 'Borang dikesan', 'Fasa', 'Asas'].forEach((h) => hr.appendChild(cipta('th', null, h)));
+      hd.appendChild(hr);
+      for (const p of PDF.prog) {
+        const tr = cipta('tr');
+        tr.appendChild(cipta('td', null, p.mula)); tr.appendChild(cipta('td', null, p.kod || '-'));
+        const c = {}; p.rekod.forEach((r) => { c[r.jenis] = (c[r.jenis] || 0) + 1; });
+        tr.appendChild(cipta('td', null, Object.entries(c).sort().map(([k, v]) => `${k}×${v}`).join(', ')));
+        const td = cipta('td'); const sel = cipta('select', 'npq-input');
+        sel.setAttribute('aria-label', `Fasa bagi program bermula ${p.mula}`);
+        sel.appendChild(new Option('Pilih fasa', ''));
+        [1, 2, 3].forEach((n) => sel.appendChild(new Option(`Fasa ${n}`, String(n))));
+        sel.value = p.andaian || !p.fasa ? '' : String(p.fasa);
+        sel.onchange = () => {
+          if (sel.value) PDF.peta[p.mula] = +sel.value; else delete PDF.peta[p.mula];
+          kemaskiniCalon(); tetapSimpan(); dash.draw('ringkas-pdf'); dash.draw('ringkas-muat');
+        };
+        td.appendChild(sel); tr.appendChild(td);
+        tr.appendChild(cipta('td', 'npq-m', (PDF.peta[p.mula] ? 'pilihan anda' : p.asas || 'tidak diketahui') + (p.andaian && !PDF.peta[p.mula] ? ` (cadangan: Fasa ${p.fasa})` : '')));
+        tb.appendChild(tr);
+      }
+      const jad = cipta('table', 'npq-table'); jad.append(hd, tb);
+      const wrap = cipta('div', 'npq-scroll'); wrap.appendChild(jad); nod.push(wrap);
+    }
+    const bacaan = PDF.rekod.flatMap((r) => r.tidak_dibaca.map(([n, x]) => `${n}: ${x}`));
+    const lain = [...PDF.dilangkau.map(([n, x]) => `Dilangkau: ${n} (${x})`), ...bacaan.map((x) => `Tidak dapat dibaca: ${x}`)];
+    if (lain.length) {
+      const ul = cipta('ul', 'npq-senarai-ralat');
+      lain.slice(0, 10).forEach((x) => ul.appendChild(cipta('li', null, x)));
+      if (lain.length > 10) ul.appendChild(cipta('li', null, `...dan ${lain.length - 10} lagi.`));
+      nod.push(ul);
+    }
+    el.replaceChildren(...nod);
+  });
+  [['npq-fail-pdf'], ['npq-folder-pdf']].forEach(([id]) => {
+    const e = $(id);
+    if (e) e.addEventListener('change', () => { const f = [...(e.files || [])]; const lain = $(id === 'npq-fail-pdf' ? 'npq-folder-pdf' : 'npq-fail-pdf'); if (lain) lain.value = ''; prosesPdf(f); });
+  });
   const mesejSimpan = (t) => { S.mesej = t || ''; dash.draw('mesej-muat'); };
   const simpanBtn = $('npq-simpan-muat');
   if (simpanBtn) {
