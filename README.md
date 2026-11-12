@@ -13,3 +13,6 @@ Dashboard interaktif satu halaman (HTML statik) bagi laporan i-Penilaian IAB: sk
 3. Tekan **Simpan dan papar**. Tajuk dan semua paparan bertukar kepada kumpulan itu; tukar semula melalui penapis **Kumpulan**.
 
 Fail dibaca dalam pelayar dan disimpan dalam pelayar pengguna sahaja (IndexedDB); tiada data dihantar ke pelayan. `templat/Contoh_Data_SRGH5_2026.xlsx` ialah data SRGH5 dalam format yang sama.
+
+## Alat menukar PDF kepada Excel
+Lihat [`alat/README.md`](alat/README.md). Alat ini menukar PDF i-Penilaian secara pukal kepada satu fail xlsx yang boleh dimuat naik ke dashboard.
