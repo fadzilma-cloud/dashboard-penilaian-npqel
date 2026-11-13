@@ -32,4 +32,7 @@ Butang **Muat naik data** disembunyikan secara lalai dan hanya muncul selepas Pe
 6. Dalam `index.html`, isi `window.NPQ_AUTH_CONFIG = {url: '...', anonKey: '...'}` (cari `NPQ_AUTH_CONFIG`).
 
 ### Had keselamatan
-Dashboard ialah laman statik dan data paparan sedia ada dalam fail HTML, jadi log masuk ini mengawal akses kepada fungsi muat naik, bukan kerahsiaan data paparan. Data yang dimuat naik hanya disimpan dalam pelayar pengurus itu sendiri (IndexedDB), bukan dikongsi dengan pelawat lain.
+Dashboard ialah laman statik dan data paparan sedia ada dalam fail HTML, jadi log masuk ini mengawal akses kepada fungsi muat naik, bukan kerahsiaan data paparan. Data kumpulan yang dimuat naik disimpan dalam jadual `kumpulan_data` Supabase dan boleh dilihat oleh semua pelawat tanpa log masuk. Tulis, kemas kini dan padam hanya dibenarkan untuk pengguna yang log masuk (peraturan RLS pada jadual; pengguna tanpa nama ditolak). Semua Pengurus mempunyai kebenaran yang sama. Data lama yang pernah disimpan dalam pelayar (IndexedDB) kelihatan dalam tetingkap Muat naik data dengan butang *Hantar ke pangkalan data*.
+
+### Jadual `kumpulan_data`
+Lajur: `key` (kumpulan|tahun), `kumpulan`, `tahun`, `fail`, `bil_sesi`, `data` (jsonb), `dikemas_pada`. RLS diaktifkan: `select` untuk `anon` dan `authenticated`; `insert/update/delete` hanya untuk `authenticated` yang bukan pengguna tanpa nama. Pastikan **Allow new users to sign up** kekal dimatikan, kerana mana-mana pengguna berdaftar boleh menulis.

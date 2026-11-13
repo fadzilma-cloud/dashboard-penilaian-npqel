@@ -2365,6 +2365,30 @@ if (typeof window !== 'undefined') window.NPQ_PDF = NPQ_PDF;
   const dbSimpan = (e) => txn('readwrite', (st) => st.put(e));
   const dbPadam = (k) => txn('readwrite', (st) => st.delete(k));
 
+  // ---------- Storan bersama (Supabase PostgREST; baca awam, tulis Pengurus log masuk) ----------
+  const sbAda = () => STATIK && !!(window.NPQ_AUTH_CONFIG && window.NPQ_AUTH_CONFIG.url && window.NPQ_AUTH_CONFIG.anonKey);
+  async function sb(laluan, opt = {}) {
+    const c = window.NPQ_AUTH_CONFIG;
+    const tok = window.NPQ_TOKEN && window.NPQ_TOKEN();
+    if (opt.tulis && !tok) throw new Error('Sesi log masuk telah tamat. Sila log masuk semula.');
+    const r = await fetch(c.url.replace(/\/+$/, '') + '/rest/v1/' + laluan, {
+      method: opt.kaedah || 'GET',
+      headers: Object.assign({apikey: c.anonKey, Authorization: 'Bearer ' + (tok || c.anonKey)}, opt.badan ? {'Content-Type': 'application/json'} : {}, opt.prefer ? {Prefer: opt.prefer} : {}),
+      body: opt.badan ? JSON.stringify(opt.badan) : undefined,
+    });
+    if (r.status === 401 || r.status === 403) throw new Error('Tiada kebenaran. Sila log masuk semula sebagai Pengurus.');
+    if (!r.ok) throw new Error('Pelayan memulangkan ralat ' + r.status + '.');
+    return r.status === 204 || opt.prefer ? null : r.json();
+  }
+  const sbSenarai = () => sb('kumpulan_data?select=key,kumpulan,tahun,fail,bil_sesi,dikemas_pada&order=tahun.desc');
+  const sbData = async (key) => {
+    const j = await sb('kumpulan_data?select=data&key=eq.' + encodeURIComponent(key));
+    if (!j || !j[0]) throw new Error('Kumpulan tidak ditemui dalam pangkalan data.');
+    return j[0].data;
+  };
+  const sbSimpan = (e) => sb('kumpulan_data', {kaedah: 'POST', tulis: true, prefer: 'resolution=merge-duplicates,return=minimal', badan: {key: e.key, kumpulan: e.kumpulan, tahun: e.tahun, fail: e.fail || null, bil_sesi: e.data.sesi.length, data: e.data}});
+  const sbPadam = (key) => sb('kumpulan_data?key=eq.' + encodeURIComponent(key), {kaedah: 'DELETE', tulis: true, prefer: 'return=minimal'});
+
   // ---------- Pertukaran kumpulan aktif ----------
   const BOLEH = new Set(['pilih-kumpulan', 'tajuk-kumpulan', 'pautan-templat', 'ringkas-muat', 'ringkas-pdf', 'senarai-kumpulan', 'status-simpan', 'mesej-muat']);
   function tiadaPilihan() {
@@ -2373,6 +2397,26 @@ if (typeof window !== 'undefined') window.NPQ_PDF = NPQ_PDF;
     root.querySelectorAll('[data-draw]').forEach((e) => { if (!BOLEH.has(e.dataset.draw)) e.replaceChildren(); });
     const reset = $('npq-reset'); if (reset) reset.click();
     lukisSemua();
+  }
+  const kosongTeks = (h, p) => { const k = $('npq-kosong'); if (!k) return; k.querySelector('h2').textContent = h; k.querySelector('p').textContent = p; };
+  const KOSONG_ASAL = ['Pilih kumpulan untuk melihat data penilaian', 'Tiada data dipaparkan secara lalai. Gunakan senarai Kumpulan di atas untuk memilih kumpulan dan tahun ambilan yang dikehendaki.'];
+  async function pilihKumpulan(key) {
+    const e = key && S.ada.get(key);
+    S.sedang = key;
+    if (e && !e.data) {
+      tiadaPilihan();
+      kosongTeks('Memuat data kumpulan...', 'Sila tunggu sebentar.');
+      try { e.data = await sbData(key); }
+      catch (x) {
+        if (S.sedang !== key) return;
+        kosongTeks('Data kumpulan tidak dapat dimuat', (x && x.message) || 'Semak sambungan internet dan cuba lagi.');
+        dash.draw('pilih-kumpulan');
+        return;
+      }
+      if (S.sedang !== key) return;
+      kosongTeks(...KOSONG_ASAL);
+    }
+    aktifkan(key);
   }
   function aktifkan(key) {
     S.pilih = true;
@@ -2420,7 +2464,7 @@ if (typeof window !== 'undefined') window.NPQ_PDF = NPQ_PDF;
       return o;
     }));
     sel.value = !S.pilih ? '__tiada' : (S.aktif == null ? '' : S.aktif);
-    sel.onchange = () => (sel.value === '__tiada' ? tiadaPilihan() : aktifkan(sel.value || null));
+    sel.onchange = () => (sel.value === '__tiada' ? (S.sedang = null, kosongTeks(...KOSONG_ASAL), tiadaPilihan()) : pilihKumpulan(sel.value || null));
   });
   dash.draw('pautan-templat', (a) => {
     a.textContent = 'Muat turun templat Excel';
@@ -2429,7 +2473,7 @@ if (typeof window !== 'undefined') window.NPQ_PDF = NPQ_PDF;
   });
   dash.draw('status-simpan', (el) => {
     el.textContent = STATIK
-      ? 'Data yang dimuat naik disimpan dalam pelayar ini sahaja (tidak dihantar ke mana-mana pelayan) dan hanya kelihatan kepada anda pada peranti ini. Membersihkan data tapak dalam pelayar akan memadamkannya.'
+      ? 'Data yang dimuat naik disimpan dalam pangkalan data Supabase dan dapat dilihat oleh semua pelawat dashboard tanpa log masuk. Hanya Pengurus yang log masuk boleh menambah atau memadam kumpulan.'
       : 'Data yang dimuat naik hanya wujud untuk sesi ini dan hilang apabila halaman ditutup atau dimuat semula. Ia tidak dihantar ke mana-mana pelayan dan tidak kelihatan kepada pengguna lain.';
   });
   dash.draw('ringkas-muat', (el) => {
@@ -2469,21 +2513,37 @@ if (typeof window !== 'undefined') window.NPQ_PDF = NPQ_PDF;
   });
   dash.draw('senarai-kumpulan', (ul) => {
     const semua = [...S.ada.values()].sort((a, b) => b.tahun - a.tahun || a.kumpulan.localeCompare(b.kumpulan, 'ms'));
-    if (!semua.length) return ul.replaceChildren(cipta('li', 'npq-m', 'Belum ada kumpulan dimuat naik.'));
+    if (!semua.length && !(S.lokal || []).some((l) => !S.ada.has(l.key))) return ul.replaceChildren(cipta('li', 'npq-m', 'Belum ada kumpulan dimuat naik.'));
     ul.replaceChildren(...semua.map((e) => {
       const li = cipta('li', 'npq-baris-kump');
-      li.appendChild(cipta('span', null, `${e.kumpulan} (${e.tahun}) · ${e.data.sesi.length} sesi · ${e.fail || ''}`));
+      li.appendChild(cipta('span', null, `${e.kumpulan} (${e.tahun}) · ${e.bil_sesi != null ? e.bil_sesi : e.data.sesi.length} sesi${e.fail ? ' · ' + e.fail : ''}`));
       const b = cipta('button', 'npq-btn', 'Padam');
       b.type = 'button';
       b.onclick = async () => {
+        if (sbAda()) { try { await sbPadam(e.key); } catch (x) { return mesejSimpan('Gagal memadam: ' + ((x && x.message) || 'ralat tidak diketahui')); } }
         S.ada.delete(e.key);
-        if (STATIK) { try { await dbPadam(e.key); } catch (x) { /* abaikan */ } }
         if (S.aktif === e.key) tiadaPilihan();
         else lukisSemua();
       };
       li.appendChild(b);
       return li;
     }));
+    // Data setempat lama (IndexedDB) yang belum dihantar ke pangkalan data bersama
+    (S.lokal || []).filter((l) => !S.ada.has(l.key)).forEach((l) => {
+      const li = cipta('li', 'npq-baris-kump');
+      li.appendChild(cipta('span', null, `${l.kumpulan} (${l.tahun}) · ${l.data.sesi.length} sesi · hanya dalam pelayar ini`));
+      const b = cipta('button', 'npq-btn', 'Hantar ke pangkalan data');
+      b.type = 'button';
+      b.onclick = async () => {
+        try { await sbSimpan(l); } catch (x) { return mesejSimpan('Gagal menghantar: ' + ((x && x.message) || 'ralat tidak diketahui')); }
+        S.ada.set(l.key, {key: l.key, kumpulan: l.kumpulan, tahun: l.tahun, fail: l.fail, bil_sesi: l.data.sesi.length, data: l.data});
+        S.lokal = S.lokal.filter((z) => z.key !== l.key);
+        try { await dbPadam(l.key); } catch (x) { /* abaikan */ }
+        lukisSemua();
+      };
+      li.appendChild(b);
+      ul.appendChild(li);
+    });
   });
 
   // ---------- Kawalan ----------
@@ -2695,6 +2755,7 @@ if (typeof window !== 'undefined') window.NPQ_PDF = NPQ_PDF;
       for (const v of S.ada.values()) if (v.tahun === tahun && v.kumpulan.trim().toLowerCase() === kump.toLowerCase()) key = v.key;
       if (kump.toLowerCase() === ASAL.kumpulan.toLowerCase() && tahun === ASAL.tahun) return mesejSimpan(`${ASAL.kumpulan} ${ASAL.tahun} ialah data asal dashboard dan tidak boleh digantikan.`);
       const lama = S.ada.get(key);
+      if (lama && !lama.data && sbAda()) { try { lama.data = await sbData(key); } catch (x) { return mesejSimpan('Data kumpulan sedia ada tidak dapat dimuat untuk digabungkan: ' + ((x && x.message) || 'ralat')); } }
       let gabung = c.data, namaFail = c.nama, nota = '';
       if (lama) {
         // Kumpulan dan tahun sama: kekalkan fasa sedia ada, ganti hanya fasa yang dimuat naik semula.
@@ -2712,8 +2773,9 @@ if (typeof window !== 'undefined') window.NPQ_PDF = NPQ_PDF;
         nota = [...baru].sort().join(', ');
       }
       const e = {key, kumpulan: kump, tahun, at: new Date().toISOString(), fail: namaFail, data: gabung};
+      e.bil_sesi = gabung.sesi.length;
+      if (sbAda()) { try { await sbSimpan(e); } catch (x) { return mesejSimpan('Data tidak dapat disimpan ke pangkalan data: ' + ((x && x.message) || 'ralat tidak diketahui')); } }
       S.ada.set(key, e);
-      if (STATIK && window.indexedDB) { try { await dbSimpan(e); } catch (x) { mesejSimpan('Data dipaparkan tetapi gagal disimpan dalam pelayar ini.'); } }
       S.calon = null;
       if (inFail) inFail.value = '';
       tetapSimpan();
@@ -2723,11 +2785,18 @@ if (typeof window !== 'undefined') window.NPQ_PDF = NPQ_PDF;
   }
 
   tetapSimpan();
-  if (STATIK && window.indexedDB) {
-    dbSemua().then((senarai) => {
-      (senarai || []).forEach((e) => S.ada.set(e.key, e));
-      if (S.ada.size) ['pilih-kumpulan', 'senarai-kumpulan'].forEach((n) => dash.draw(n));
-    }).catch(() => {});
+  if (STATIK) {
+    setTimeout(() => {
+      if (sbAda()) {
+        sbSenarai().then((rows) => {
+          (rows || []).forEach((r) => S.ada.set(r.key, Object.assign({}, S.ada.get(r.key) || {}, r, {data: (S.ada.get(r.key) || {}).data || null})));
+          ['pilih-kumpulan', 'senarai-kumpulan'].forEach((n) => dash.draw(n));
+        }).catch(() => { kosongTeks('Senarai kumpulan tidak dapat dimuat', 'Semak sambungan internet, kemudian muat semula halaman.'); });
+      }
+      if (window.indexedDB) {
+        dbSemua().then((l) => { S.lokal = l || []; if (S.lokal.length) dash.draw('senarai-kumpulan'); }).catch(() => {});
+      }
+    }, 0);
   }
 })();
 </script>
@@ -2742,6 +2811,7 @@ window.NPQ_AUTH_CONFIG = window.NPQ_AUTH_CONFIG || {url: 'https://yshfrkjbudoyiu
   const TETAPAN = !!(C.url && C.anonKey);
   const base = TETAPAN ? C.url.replace(/\/+$/, '') + '/auth/v1' : '';
   let sesi = null, pemasa = null, pemicu = null;
+  window.NPQ_TOKEN = () => (sesi && sesi.tamat > Date.now() ? sesi.at : null);
   const simpan = (s) => { try { s ? localStorage.setItem(KUNCI, JSON.stringify(s)) : localStorage.removeItem(KUNCI); } catch (x) {} };
   const muatSimpan = () => { try { return JSON.parse(localStorage.getItem(KUNCI) || 'null'); } catch (x) { return null; } };
   const mesej = (t, ok) => { const m = $('npq-auth-mesej'); m.textContent = t || ''; m.style.color = ok ? '' : (t ? 'var(--color-danger, #b3261e)' : ''); };
