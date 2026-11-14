@@ -2102,6 +2102,7 @@ if (typeof window !== 'undefined') window.NPQ_PDF = NPQ_PDF;
     return n;
   };
   const kunciDari = (k, t) => k + '|' + t;
+  const ASAL_KEY = kunciDari(ASAL.kumpulan, ASAL.tahun);
   const lukisSemua = () => [...new Set([...root.querySelectorAll('[data-draw]')].map((e) => e.dataset.draw))].forEach((n) => dash.draw(n));
 
   // ---------- Pembaca .xlsx (zip + XML, tanpa pustaka luar) ----------
@@ -2458,7 +2459,7 @@ if (typeof window !== 'undefined') window.NPQ_PDF = NPQ_PDF;
     if (STATIK) document.title = `Penilaian NPQEL ${i.kumpulan} Ambilan ${i.tahun}`;
   });
   dash.draw('pilih-kumpulan', (sel) => {
-    const semua = [{key: null, kumpulan: ASAL.kumpulan, tahun: ASAL.tahun}, ...[...S.ada.values()].sort((a, b) => b.tahun - a.tahun || a.kumpulan.localeCompare(b.kumpulan, 'ms'))];
+    const semua = [...(S.ada.has(ASAL_KEY) ? [] : [{key: null, kumpulan: ASAL.kumpulan, tahun: ASAL.tahun}]), ...[...S.ada.values()].sort((a, b) => b.tahun - a.tahun || a.kumpulan.localeCompare(b.kumpulan, 'ms'))];
     sel.replaceChildren(new Option('Pilih kumpulan', '__tiada'), ...semua.map((e) => {
       const o = new Option(`${e.kumpulan} (${e.tahun})`, e.key == null ? '' : e.key);
       return o;
@@ -2513,7 +2514,7 @@ if (typeof window !== 'undefined') window.NPQ_PDF = NPQ_PDF;
   });
   dash.draw('senarai-kumpulan', (ul) => {
     const semua = [...S.ada.values()].sort((a, b) => b.tahun - a.tahun || a.kumpulan.localeCompare(b.kumpulan, 'ms'));
-    if (!semua.length && !(S.lokal || []).some((l) => !S.ada.has(l.key))) return ul.replaceChildren(cipta('li', 'npq-m', 'Belum ada kumpulan dimuat naik.'));
+    if (!semua.length && !(sbAda() && window.NPQ_PENGURUS && !S.ada.has(ASAL_KEY)) && !(S.lokal || []).some((l) => !S.ada.has(l.key))) return ul.replaceChildren(cipta('li', 'npq-m', 'Belum ada kumpulan dimuat naik.'));
     ul.replaceChildren(...semua.map((e) => {
       const li = cipta('li', 'npq-baris-kump');
       li.appendChild(cipta('span', null, `${e.kumpulan} (${e.tahun}) · ${e.bil_sesi != null ? e.bil_sesi : e.data.sesi.length} sesi${e.fail ? ' · ' + e.fail : ''}`));
@@ -2528,6 +2529,30 @@ if (typeof window !== 'undefined') window.NPQ_PDF = NPQ_PDF;
       li.appendChild(b);
       return li;
     }));
+    if (sbAda() && window.NPQ_PENGURUS && !S.ada.has(ASAL_KEY)) {
+      const li = cipta('li', 'npq-baris-kump');
+      li.appendChild(cipta('span', null, `${ASAL.kumpulan} (${ASAL.tahun}) · data asal dashboard · belum dalam pangkalan data`));
+      const b = cipta('button', 'npq-btn npq-btn-utama', 'Pindahkan ke pangkalan data');
+      b.type = 'button';
+      b.onclick = async () => {
+        b.disabled = true; mesejSimpan('Memindahkan data...');
+        try {
+          const data = {};
+          for (const n of NAMA) data[n] = JSON.parse(JSON.stringify(DATA[n] || []));
+          const e = {key: ASAL_KEY, kumpulan: ASAL.kumpulan, tahun: ASAL.tahun, fail: 'Data asal dashboard (i-Penilaian Fasa 1-3)', data};
+          await sbSimpan(e);
+          const balik = await sbData(ASAL_KEY);
+          const beza = NAMA.filter((n) => (balik[n] || []).length !== data[n].length);
+          if (beza.length) throw new Error('Pengesahan gagal bagi lembaran: ' + beza.join(', '));
+          const wasAsal = S.pilih && S.aktif == null;
+          S.ada.set(ASAL_KEY, Object.assign({}, e, {bil_sesi: data.sesi.length}));
+          mesejSimpan('Dipindahkan dan disahkan: ' + NAMA.map((n) => n + ' ' + data[n].length).join(', ') + '.');
+          if (wasAsal) aktifkan(ASAL_KEY); else lukisSemua();
+        } catch (x) { b.disabled = false; mesejSimpan('Pemindahan gagal: ' + ((x && x.message) || 'ralat tidak diketahui')); }
+      };
+      li.appendChild(b);
+      ul.appendChild(li);
+    }
     // Data setempat lama (IndexedDB) yang belum dihantar ke pangkalan data bersama
     (S.lokal || []).filter((l) => !S.ada.has(l.key)).forEach((l) => {
       const li = cipta('li', 'npq-baris-kump');
@@ -2553,6 +2578,7 @@ if (typeof window !== 'undefined') window.NPQ_PDF = NPQ_PDF;
     if (!modal || !window.NPQ_PENGURUS) return;
     pemicu = document.activeElement;
     modal.hidden = false;
+    dash.draw('senarai-kumpulan');
     ['ringkas-muat', 'ringkas-pdf', 'senarai-kumpulan', 'pautan-templat', 'status-simpan', 'mesej-muat'].forEach((n) => dash.draw(n));
     const f = $('npq-fail-muat');
     if (f) f.focus();
@@ -2753,7 +2779,7 @@ if (typeof window !== 'undefined') window.NPQ_PDF = NPQ_PDF;
       mesejSimpan('');
       let key = kunciDari(kump, tahun);
       for (const v of S.ada.values()) if (v.tahun === tahun && v.kumpulan.trim().toLowerCase() === kump.toLowerCase()) key = v.key;
-      if (kump.toLowerCase() === ASAL.kumpulan.toLowerCase() && tahun === ASAL.tahun) return mesejSimpan(`${ASAL.kumpulan} ${ASAL.tahun} ialah data asal dashboard dan tidak boleh digantikan.`);
+      if (kump.toLowerCase() === ASAL.kumpulan.toLowerCase() && tahun === ASAL.tahun && !S.ada.has(key)) return mesejSimpan(`${ASAL.kumpulan} ${ASAL.tahun} ialah data asal dashboard. Pindahkan dahulu ke pangkalan data menggunakan butang di bahagian Kumpulan yang telah dimuat naik, kemudian muat naik fasa tambahan.`);
       const lama = S.ada.get(key);
       if (lama && !lama.data && sbAda()) { try { lama.data = await sbData(key); } catch (x) { return mesejSimpan('Data kumpulan sedia ada tidak dapat dimuat untuk digabungkan: ' + ((x && x.message) || 'ralat')); } }
       let gabung = c.data, namaFail = c.nama, nota = '';
